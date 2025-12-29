@@ -8,7 +8,8 @@ use std::time::Duration;
 use serde::{Serialize, Deserialize};
 use std::fs;
 use apollos_types::{
-    CondensedData, GtfsCondensed, GbfsCondensed, WeatherCondensed, 
+    CondensedData, MaybeWrappedData, WrappedData, QueryInfo,
+    GtfsCondensed, GbfsCondensed, WeatherCondensed, 
     AqiCondensed, EphemerisCondensed, CalendarCondensed, TidalCondensed
 };
 
@@ -33,10 +34,16 @@ struct Args {
     mqtt_topic: String,
 }
 
+#[derive(Debug, Clone)]
+struct DataEntry {
+    content: CondensedData,
+    query_info: Option<QueryInfo>,
+}
+
 struct ApollosKiosk {
     _args: Args,
     rx: Receiver<mqtt::Message>,
-    data: HashMap<String, CondensedData>,
+    data: HashMap<String, DataEntry>,
     config: Config,
     config_path: std::path::PathBuf,
 }
@@ -214,33 +221,45 @@ impl eframe::App for ApollosKiosk {
 
             if let Ok(raw_map) = serde_json::from_str::<HashMap<String, serde_json::Value>>(&payload) {
                 for (key, value) in raw_map {
-                    let parsed = if key.starts_with("gtfs-") {
-                        serde_json::from_value::<Vec<GtfsCondensed>>(value).ok().map(CondensedData::Gtfs)
-                    } else if key.starts_with("gbfs-") {
-                        serde_json::from_value::<Vec<GbfsCondensed>>(value).ok().map(CondensedData::Gbfs)
-                    } else if key.starts_with("weather-") {
-                        serde_json::from_value::<Vec<WeatherCondensed>>(value).ok().map(CondensedData::Weather)
-                    } else if key.starts_with("aqi-") {
-                        serde_json::from_value::<Vec<AqiCondensed>>(value).ok().map(CondensedData::Aqi)
-                    } else if key.starts_with("ephem-") {
-                        serde_json::from_value::<Vec<EphemerisCondensed>>(value).ok().map(CondensedData::Ephem)
-                    } else if key.starts_with("cal-") {
-                        serde_json::from_value::<Vec<CalendarCondensed>>(value).ok().map(CondensedData::Calendar)
-                    } else if key.starts_with("tidal-") {
-                        serde_json::from_value::<Vec<TidalCondensed>>(value).ok().map(CondensedData::Tidal)
-                    } else if key.starts_with("cronos-") {
-                        Some(CondensedData::Cronos(value))
-                    } else if key.starts_with("gitlab-") {
-                        Some(CondensedData::Gitlab(value))
-                    } else if key.starts_with("pkg-") {
-                        Some(CondensedData::Packages(value))
-                    } else if key.starts_with("const-") {
-                        Some(CondensedData::Const(value))
+                    // Try to parse as wrapped data first (new format)
+                    let (content, query_info) = if let Ok(wrapped) = serde_json::from_value::<WrappedData>(value.clone()) {
+                        (Some(wrapped.data), Some(wrapped.query))
                     } else {
-                        None
+                        // Fall back to unwrapped format (old format)
+                        let parsed = if key.starts_with("gtfs-") {
+                            serde_json::from_value::<Vec<GtfsCondensed>>(value.clone()).ok().map(CondensedData::Gtfs)
+                        } else if key.starts_with("gbfs-") {
+                            serde_json::from_value::<Vec<GbfsCondensed>>(value.clone()).ok().map(CondensedData::Gbfs)
+                        } else if key.starts_with("weather-") {
+                            serde_json::from_value::<Vec<WeatherCondensed>>(value.clone()).ok().map(CondensedData::Weather)
+                        } else if key.starts_with("aqi-") {
+                            serde_json::from_value::<Vec<AqiCondensed>>(value.clone()).ok().map(CondensedData::Aqi)
+                        } else if key.starts_with("ephem-") {
+                            serde_json::from_value::<Vec<EphemerisCondensed>>(value.clone()).ok().map(CondensedData::Ephem)
+                        } else if key.starts_with("cal-") {
+                            serde_json::from_value::<Vec<CalendarCondensed>>(value.clone()).ok().map(CondensedData::Calendar)
+                        } else if key.starts_with("tidal-") {
+                            serde_json::from_value::<Vec<TidalCondensed>>(value.clone()).ok().map(CondensedData::Tidal)
+                        } else if key.starts_with("cronos-") {
+                            Some(CondensedData::Cronos(value.clone()))
+                        } else if key.starts_with("gitlab-") {
+                            Some(CondensedData::Gitlab(value.clone()))
+                        } else if key.starts_with("pkg-") {
+                            Some(CondensedData::Packages(value.clone()))
+                        } else if key.starts_with("const-") {
+                            Some(CondensedData::Const(value.clone()))
+                        } else {
+                            None
+                        };
+                        (parsed, None)
                     };
 
-                    if let Some(data_content) = parsed {
+                    if let Some(data_content) = content {
+                        let entry = DataEntry {
+                            content: data_content,
+                            query_info: query_info.clone(),
+                        };
+                        
                         // Check if this is a new key
                         if !self.data.contains_key(&key) {
                             // Check if it's not already assigned to any panel or unassigned list
@@ -253,7 +272,7 @@ impl eframe::App for ApollosKiosk {
                             }
                         }
                         
-                        self.data.insert(key, data_content);
+                        self.data.insert(key, entry);
                     }
                 }
             }
@@ -349,7 +368,7 @@ impl ApollosKiosk {
                 let mut to_move = None;
 
                 for (idx, key) in keys.iter().enumerate() {
-                    if let Some(content) = self.data.get(key) {
+                    if let Some(entry) = self.data.get(key) {
                         self.render_large_card(ui, key, content, panel_idx, idx, &mut to_remove, &mut to_move);
                     }
                 }
@@ -374,7 +393,7 @@ impl ApollosKiosk {
         &self,
         ui: &mut egui::Ui,
         key: &str,
-        content: &CondensedData,
+        entry: &DataEntry,
         panel_idx: usize,
         card_idx: usize,
         to_remove: &mut Option<usize>,
@@ -392,8 +411,17 @@ impl ApollosKiosk {
             
             // Card header with title and controls
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(key).heading().strong().size(18.0));
+                // Use query name if available, otherwise fall back to key
+                let display_name = entry.query_info
+                    .as_ref()
+                    .map(|q| q.name.as_str())
+                    .unwrap_or(key);
+                    
+                ui.label(egui::RichText::new(display_name).heading().strong().size(18.0));
+                
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new(key).weak().small());
+                    ui.add_space(8.0);
                     ui.menu_button("⋮", |ui| {
                         if ui.button("🗑 Unassign").clicked() {
                             *to_remove = Some(card_idx);
@@ -418,7 +446,7 @@ impl ApollosKiosk {
             ui.add_space(12.0);
 
             // Card content - use the existing render_data_item logic but inline
-            match content {
+            match &entry.content {
                 CondensedData::Gtfs(routes) => self.render_gtfs_card(ui, routes),
                 CondensedData::Gbfs(stations) => self.render_gbfs_card(ui, stations),
                 CondensedData::Weather(reports) => self.render_weather_card(ui, reports),
@@ -426,7 +454,7 @@ impl ApollosKiosk {
                 CondensedData::Aqi(reports) => self.render_aqi_card(ui, reports),
                 CondensedData::Tidal(reports) => self.render_tidal_card(ui, reports),
                 _ => {
-                    ui.label(egui::RichText::new("Data received...").weak());
+                    ui.label(egui::RichText::new("Data type not yet supported in card view").weak());
                 }
             }
         });
