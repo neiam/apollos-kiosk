@@ -239,6 +239,8 @@ dependencies = [
 [[package]]
 name = "apollos-types"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75fb4fb783c74df592fbb3d1376235caae8f77e4674fb400ad876dab1e15195d"
 dependencies = [
  "serde",
  "serde_json",
