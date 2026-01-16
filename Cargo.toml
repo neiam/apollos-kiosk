@@ -6,6 +6,12 @@ description = "Apollo's Kiosk"
 authors = ["Gabe <gabe@neiam.org>"]
 license = "GPLv3"
 
+[lints.clippy]
+too_many_arguments = "allow"
+
+[lints.rust]
+dead_code = "allow"
+
 
 [package.metadata.deb]
 assets = [

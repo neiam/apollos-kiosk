@@ -13,6 +13,7 @@ use std::fs;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
+use egui::UiKind;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
@@ -344,18 +345,15 @@ impl ApollosKiosk {
                     if let Some(msg) = msg {
                         println!("Theme MQTT: Received message on topic '{}'", msg.topic());
 
-                        if msg.topic() == theme_topic {
-                            if let Ok(json) =
+                        if msg.topic() == theme_topic
+                            && let Ok(json) =
                                 serde_json::from_str::<serde_json::Value>(&msg.payload_str())
-                            {
-                                if let Some(theme_name) = json.get("theme").and_then(|t| t.as_str())
+                                && let Some(theme_name) = json.get("theme").and_then(|t| t.as_str())
                                 {
                                     println!("Theme MQTT: Parsed theme name: {}", theme_name);
                                     let _ = theme_tx.send(theme_name.to_string());
                                     theme_ctx.request_repaint();
                                 }
-                            }
-                        }
                     } else {
                         // None indicates a disconnection, but with auto-reconnect enabled
                         // the client will handle reconnection automatically
@@ -391,7 +389,7 @@ impl ApollosKiosk {
     fn render_data_item(ui: &mut egui::Ui, key: &str, content: &CondensedData) {
         let card_frame = egui::Frame::group(ui.style())
             .fill(ui.visuals().faint_bg_color)
-            .rounding(8.0)
+            .corner_radius(8.0)
             .inner_margin(12.0)
             .outer_margin(egui::Margin::symmetric(0, 4));
 
@@ -591,7 +589,7 @@ impl eframe::App for ApollosKiosk {
                 if !self.config.unassigned.is_empty() {
                     egui::Frame::group(ui.style())
                         .fill(ui.visuals().extreme_bg_color)
-                        .rounding(8.0)
+                        .corner_radius(8.0)
                         .inner_margin(12.0)
                         .outer_margin(8.0)
                         .show(ui, |ui| {
@@ -611,15 +609,15 @@ impl eframe::App for ApollosKiosk {
                                         ui.separator();
                                         if ui.button("Panel 1 (Left)").clicked() {
                                             to_move = Some((idx, 0));
-                                            ui.close_menu();
+                                            ui.close_kind(UiKind::Menu);
                                         }
                                         if ui.button("Panel 2 (Center)").clicked() {
                                             to_move = Some((idx, 1));
-                                            ui.close_menu();
+                                            ui.close_kind(UiKind::Menu);
                                         }
                                         if ui.button("Panel 3 (Right)").clicked() {
                                             to_move = Some((idx, 2));
-                                            ui.close_menu();
+                                            ui.close_kind(UiKind::Menu);
                                         }
                                     });
                                 }
@@ -647,7 +645,7 @@ impl eframe::App for ApollosKiosk {
 
 impl ApollosKiosk {
     fn get_scale_factor(&self, ctx: &egui::Context) -> f32 {
-        let viewport_size = ctx.screen_rect().size();
+        let viewport_size = ctx.content_rect().size();
         let scale_x = viewport_size.x / self.base_width;
         let scale_y = viewport_size.y / self.base_height;
         scale_x.min(scale_y)
@@ -763,12 +761,11 @@ impl ApollosKiosk {
                         ui.separator();
                         ui.label("Move to:");
                         for (idx, name) in ["Left", "Center", "Right"].iter().enumerate() {
-                            if idx != panel_idx {
-                                if ui.button(format!("➜ {}", name)).clicked() {
+                            if idx != panel_idx
+                                && ui.button(format!("➜ {}", name)).clicked() {
                                     *to_move = Some((card_idx, idx));
                                     ui.close();
                                 }
-                            }
                         }
                     });
                 });
@@ -831,8 +828,8 @@ impl ApollosKiosk {
 
     fn parse_data_entry(&self, key: &str, value: &serde_json::Value) -> Option<DataEntry> {
         // Check if this is wrapped format (has both "data" and "query" fields)
-        if let Some(obj) = value.as_object() {
-            if obj.contains_key("data") && obj.contains_key("query") {
+        if let Some(obj) = value.as_object()
+            && obj.contains_key("data") && obj.contains_key("query") {
                 println!("  - Detected wrapped format for key: {}", key);
 
                 // Extract query info
@@ -848,7 +845,6 @@ impl ApollosKiosk {
                     query_info: Some(query_info),
                 });
             }
-        }
 
         // Legacy unwrapped format
         println!("  - Parsing legacy format for key: {}", key);
@@ -873,12 +869,11 @@ impl ApollosKiosk {
         }
 
         // Handle array data (check if empty)
-        if let Some(arr) = value.as_array() {
-            if arr.is_empty() {
+        if let Some(arr) = value.as_array()
+            && arr.is_empty() {
                 println!("  - Skipping empty array for key: {}", key);
                 return None;
             }
-        }
 
         let content = if key.starts_with("gtfs-") {
             serde_json::from_value::<Vec<GtfsCondensed>>(value.clone())
@@ -976,11 +971,10 @@ impl ApollosKiosk {
                     }
                 }
 
-                if self.config.mqtt_theme_sync {
-                    if ui.button("⚙ Configure Theme MQTT...").clicked() {
+                if self.config.mqtt_theme_sync
+                    && ui.button("⚙ Configure Theme MQTT...").clicked() {
                         show_mqtt_config = true;
                     }
-                }
 
                 ui.add_space(5.0);
             });
