@@ -1,11 +1,10 @@
 use apollos_types::{
     AqiCondensed, CalendarCondensed, CondensedData, EphemerisCondensed, GbfsCondensed,
-    GtfsCondensed, QueryInfo, TidalCondensed, WeatherCondensed, WrappedData,
+    GtfsCondensed, QueryInfo, TidalCondensed, WeatherCondensed,
 };
 use clap::Parser;
 use eframe::egui;
 use egui_material_icons::icons::*;
-use log::error;
 use log::info;
 use paho_mqtt as mqtt;
 use serde::{Deserialize, Serialize};
@@ -655,7 +654,7 @@ impl ApollosKiosk {
     }
 
     fn render_panel(&mut self, ui: &mut egui::Ui, panel_idx: usize) {
-        let panel_names = ["Left Panel", "Center Panel", "Right Panel"];
+        let _panel_names = ["Left Panel", "Center Panel", "Right Panel"];
 
         egui::Frame::group(ui.style())
             .fill(ui.visuals().panel_fill)
