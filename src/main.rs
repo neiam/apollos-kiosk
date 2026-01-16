@@ -1,20 +1,19 @@
-use log::info;
+use apollos_types::{
+    AqiCondensed, CalendarCondensed, CondensedData, EphemerisCondensed, GbfsCondensed,
+    GtfsCondensed, QueryInfo, TidalCondensed, WeatherCondensed, WrappedData,
+};
 use clap::Parser;
 use eframe::egui;
-use paho_mqtt as mqtt;
 use egui_material_icons::icons::*;
+use log::error;
+use log::info;
+use paho_mqtt as mqtt;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, self};
-use std::time::Duration;
-use serde::{Serialize, Deserialize};
 use std::fs;
 use std::sync::Arc;
-use apollos_types::{
-    CondensedData, WrappedData, QueryInfo,
-    GtfsCondensed, GbfsCondensed, WeatherCondensed, 
-    AqiCondensed, EphemerisCondensed, CalendarCondensed, TidalCondensed
-};
-use log::error;
+use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
@@ -149,20 +148,20 @@ struct Args {
 
     #[arg(long, env = "MQTT_TOPIC")]
     mqtt_topic: String,
-    
+
     // Theme MQTT connection
     #[arg(long, env = "MQTT_THEME_SYNC")]
     mqtt_theme_sync: Option<bool>,
-    
+
     #[arg(long, default_value = "tcp://localhost:2883", env = "MQTT_THEME_HOST")]
     mqtt_theme_host: String,
-    
+
     #[arg(long, env = "MQTT_THEME_USERNAME")]
     mqtt_theme_username: Option<String>,
-    
+
     #[arg(long, env = "MQTT_THEME_PASSWORD")]
     mqtt_theme_password: Option<String>,
-    
+
     #[arg(long, default_value = "neiam/sync/theme", env = "MQTT_THEME_TOPIC")]
     mqtt_theme_topic: String,
 }
@@ -191,14 +190,14 @@ impl ApollosKiosk {
     fn new(cc: &eframe::CreationContext<'_>, args: Args) -> Self {
         // Initialize material icons
         egui_material_icons::initialize(&cc.egui_ctx);
-        
+
         let (tx, rx) = mpsc::channel();
-        
+
         let config_path = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("apollos-kiosk")
             .join("config.toml");
-        
+
         if let Some(parent) = config_path.parent() {
             let _ = fs::create_dir_all(parent);
         }
@@ -207,7 +206,7 @@ impl ApollosKiosk {
             .ok()
             .and_then(|s| toml::from_str(&s).ok())
             .unwrap_or_default();
-        
+
         // Merge args with config (args take precedence)
         let mut config = config;
         if let Some(sync) = args.mqtt_theme_sync {
@@ -224,14 +223,14 @@ impl ApollosKiosk {
 
         let themes = create_default_themes();
         let current_theme = config.current_theme.clone();
-        
+
         // Apply initial theme
         let theme = themes
             .iter()
             .find(|t| t.name == current_theme)
             .cloned()
             .unwrap_or_default();
-        
+
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = egui::Color32::from_rgb(
             theme.background_color[0],
@@ -247,7 +246,7 @@ impl ApollosKiosk {
 
         let (theme_tx, theme_rx) = mpsc::channel();
         let mqtt_theme_sync = config.mqtt_theme_sync;
-        
+
         // Setup data MQTT connection in a background thread
         let mqtt_args = args.clone();
         let ctx = cc.egui_ctx.clone();
@@ -281,7 +280,10 @@ impl ApollosKiosk {
                 return;
             }
 
-            println!("Data MQTT: Connected and subscribed to {}", mqtt_args.mqtt_topic);
+            println!(
+                "Data MQTT: Connected and subscribed to {}",
+                mqtt_args.mqtt_topic
+            );
 
             for msg in rx_mqtt.iter() {
                 if let Some(msg) = msg {
@@ -299,11 +301,14 @@ impl ApollosKiosk {
         // Setup separate MQTT connection for theme sync
         if mqtt_theme_sync {
             let theme_host = config.mqtt_theme_host.clone();
-            let theme_username = config.mqtt_theme_username.clone().unwrap_or_else(|| "kiosk-theme".to_string());
+            let theme_username = config
+                .mqtt_theme_username
+                .clone()
+                .unwrap_or_else(|| "kiosk-theme".to_string());
             let theme_password = config.mqtt_theme_password.clone().unwrap_or_default();
             let theme_topic = config.mqtt_theme_topic.clone();
             let theme_ctx = cc.egui_ctx.clone();
-            
+
             std::thread::spawn(move || {
                 let create_opts = mqtt::CreateOptionsBuilder::new()
                     .server_uri(theme_host)
@@ -327,7 +332,10 @@ impl ApollosKiosk {
                 }
 
                 if let Err(e) = cli.subscribe(&theme_topic, 1) {
-                    eprintln!("Error subscribing to theme topic '{}': {:?}", theme_topic, e);
+                    eprintln!(
+                        "Error subscribing to theme topic '{}': {:?}",
+                        theme_topic, e
+                    );
                     return;
                 }
 
@@ -336,10 +344,13 @@ impl ApollosKiosk {
                 for msg in rx_mqtt.iter() {
                     if let Some(msg) = msg {
                         println!("Theme MQTT: Received message on topic '{}'", msg.topic());
-                        
+
                         if msg.topic() == theme_topic {
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&msg.payload_str()) {
-                                if let Some(theme_name) = json.get("theme").and_then(|t| t.as_str()) {
+                            if let Ok(json) =
+                                serde_json::from_str::<serde_json::Value>(&msg.payload_str())
+                            {
+                                if let Some(theme_name) = json.get("theme").and_then(|t| t.as_str())
+                                {
                                     println!("Theme MQTT: Parsed theme name: {}", theme_name);
                                     let _ = theme_tx.send(theme_name.to_string());
                                     theme_ctx.request_repaint();
@@ -387,9 +398,14 @@ impl ApollosKiosk {
 
         card_frame.show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            
+
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(key).strong().size(12.0).color(ui.visuals().weak_text_color()));
+                ui.label(
+                    egui::RichText::new(key)
+                        .strong()
+                        .size(12.0)
+                        .color(ui.visuals().weak_text_color()),
+                );
             });
             ui.add_space(4.0);
 
@@ -402,12 +418,20 @@ impl ApollosKiosk {
                                 ui.label(egui::RichText::new(&r.route).heading().strong());
                                 ui.label(egui::RichText::new(&r.dest).size(16.0));
                             });
-                            ui.label(egui::RichText::new(&r.dir).small().color(ui.visuals().weak_text_color()));
-                            
+                            ui.label(
+                                egui::RichText::new(&r.dir)
+                                    .small()
+                                    .color(ui.visuals().weak_text_color()),
+                            );
+
                             ui.add_space(4.0);
                             ui.horizontal_wrapped(|ui| {
                                 for time in &r.times {
-                                    ui.label(egui::RichText::new(time).monospace().background_color(ui.visuals().extreme_bg_color));
+                                    ui.label(
+                                        egui::RichText::new(time)
+                                            .monospace()
+                                            .background_color(ui.visuals().extreme_bg_color),
+                                    );
                                 }
                             });
                         });
@@ -430,7 +454,11 @@ impl ApollosKiosk {
                 CondensedData::Weather(reports) => {
                     for w in reports {
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(format!("{:.0}°", w.temp)).size(32.0).strong());
+                            ui.label(
+                                egui::RichText::new(format!("{:.0}°", w.temp))
+                                    .size(32.0)
+                                    .strong(),
+                            );
                             ui.vertical(|ui| {
                                 ui.label(egui::RichText::new(&w.weather).strong());
                                 ui.label(format!("Feels like {:.0}°", w.feel));
@@ -448,14 +476,20 @@ impl ApollosKiosk {
                 }
                 CondensedData::Aqi(reports) => {
                     for a in reports {
-                        ui.label(egui::RichText::new(a.name.as_deref().unwrap_or("Unknown")).strong());
+                        ui.label(
+                            egui::RichText::new(a.name.as_deref().unwrap_or("Unknown")).strong(),
+                        );
                         ui.label(format!("Measurements: {}", a.measurements.len()));
                     }
                 }
                 CondensedData::Tidal(reports) => {
                     for t in reports {
-                        if let Some(h) = &t.first_h { ui.label(format!("⬆ High: {}", h)); }
-                        if let Some(l) = &t.first_l { ui.label(format!("⬇ Low: {}", l)); }
+                        if let Some(h) = &t.first_h {
+                            ui.label(format!("⬆ High: {}", h));
+                        }
+                        if let Some(l) = &t.first_l {
+                            ui.label(format!("⬇ Low: {}", l));
+                        }
                     }
                 }
                 _ => {
@@ -480,9 +514,9 @@ impl eframe::App for ApollosKiosk {
                 "clays" => "Clays",
                 "stones" => "Stones",
                 "solarized" => "Solarized",
-                _ => ""
+                _ => "",
             };
-            
+
             if !kiosk_theme.is_empty() && kiosk_theme != self.current_theme {
                 self.current_theme = kiosk_theme.to_string();
                 self.apply_theme(ctx);
@@ -492,32 +526,33 @@ impl eframe::App for ApollosKiosk {
                 eprintln!("Unknown theme from MQTT: {}, keeping current", theme_name);
             }
         }
-        
+
         // Receive and parse any pending messages
         while let Ok(msg) = self.rx.try_recv() {
             let payload = msg.payload_str();
 
-            if let Ok(raw_map) = serde_json::from_str::<HashMap<String, serde_json::Value>>(&payload) {
+            if let Ok(raw_map) =
+                serde_json::from_str::<HashMap<String, serde_json::Value>>(&payload)
+            {
                 if let Ok(pretty) = serde_json::to_string_pretty(&raw_map) {
                     println!("MQTT: Received valid data map:\n{}", pretty);
                 }
-                
+
                 for (key, value) in raw_map {
                     if let Some(entry) = self.parse_data_entry(&key, &value) {
-                        
                         // Check if this is a new key
                         if !self.data.contains_key(&key) {
                             // Check if it's not already assigned to any panel or unassigned list
                             let is_assigned = self.config.panels.iter().any(|p| p.contains(&key))
                                 || self.config.unassigned.contains(&key);
-                            
+
                             if !is_assigned {
                                 println!("  - Adding {} to unassigned", key);
                                 self.config.unassigned.push(key.clone());
                                 self.save_config();
                             }
                         }
-                        
+
                         self.data.insert(key, entry);
                     } else {
                         println!("  - Failed to parse data for key: {}", key);
@@ -533,16 +568,19 @@ impl eframe::App for ApollosKiosk {
                 ui.heading("Apollos Kiosk");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     // Theme selector button
-                    if ui.button(egui::RichText::new(ICON_PALETTE).size(20.0)).clicked() {
+                    if ui
+                        .button(egui::RichText::new(ICON_PALETTE).size(20.0))
+                        .clicked()
+                    {
                         self.show_theme_selector = !self.show_theme_selector;
                     }
-                    
+
                     ui.separator();
                     ui.label(format!("{} data feeds", self.data.len()));
                 });
             });
         });
-        
+
         // Theme selector window
         if self.show_theme_selector {
             self.render_theme_selector(ctx);
@@ -558,12 +596,16 @@ impl eframe::App for ApollosKiosk {
                         .inner_margin(12.0)
                         .outer_margin(8.0)
                         .show(ui, |ui| {
-                            ui.label(egui::RichText::new("📦 Unassigned Feeds").heading().strong());
+                            ui.label(
+                                egui::RichText::new("📦 Unassigned Feeds")
+                                    .heading()
+                                    .strong(),
+                            );
                             ui.add_space(8.0);
-                            
+
                             ui.horizontal_wrapped(|ui| {
                                 let mut to_move = None;
-                                
+
                                 for (idx, key) in self.config.unassigned.iter().enumerate() {
                                     ui.menu_button(format!("📌 {}", key), |ui| {
                                         ui.label(egui::RichText::new("Assign to panel:").strong());
@@ -582,7 +624,7 @@ impl eframe::App for ApollosKiosk {
                                         }
                                     });
                                 }
-                                
+
                                 if let Some((idx, panel_idx)) = to_move {
                                     let key = self.config.unassigned.remove(idx);
                                     self.config.panels[panel_idx].push(key);
@@ -614,18 +656,22 @@ impl ApollosKiosk {
 
     fn render_panel(&mut self, ui: &mut egui::Ui, panel_idx: usize) {
         let panel_names = ["Left Panel", "Center Panel", "Right Panel"];
-        
+
         egui::Frame::group(ui.style())
             .fill(ui.visuals().panel_fill)
             .corner_radius(8.0)
             .inner_margin(8.0)
             .show(ui, |ui| {
                 ui.set_min_height(ui.available_height());
-                
+
                 ui.horizontal(|ui| {
                     // ui.label(egui::RichText::new(panel_names[panel_idx]).strong().size(16.0));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(egui::RichText::new(format!("{}", self.config.panels[panel_idx].len())).weak().small());
+                        ui.label(
+                            egui::RichText::new(format!("{}", self.config.panels[panel_idx].len()))
+                                .weak()
+                                .small(),
+                        );
                     });
                 });
                 ui.separator();
@@ -638,7 +684,16 @@ impl ApollosKiosk {
                 let scale = self.get_scale_factor(ui.ctx());
                 for (idx, key) in keys.iter().enumerate() {
                     if let Some(entry) = self.data.get(key) {
-                        self.render_large_card(ui, key, entry, panel_idx, idx, &mut to_remove, &mut to_move, scale);
+                        self.render_large_card(
+                            ui,
+                            key,
+                            entry,
+                            panel_idx,
+                            idx,
+                            &mut to_remove,
+                            &mut to_move,
+                            scale,
+                        );
                     }
                 }
 
@@ -671,24 +726,33 @@ impl ApollosKiosk {
     ) {
         let card_frame = egui::Frame::group(ui.style())
             .fill(ui.visuals().faint_bg_color)
-            .stroke(egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color))
+            .stroke(egui::Stroke::new(
+                1.0,
+                ui.visuals().widgets.noninteractive.bg_stroke.color,
+            ))
             .corner_radius(12.0)
             .inner_margin(16.0)
             .outer_margin(egui::Margin::symmetric(0, 8));
 
         card_frame.show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            
+
             // Card header with title and controls
             ui.horizontal(|ui| {
                 // Use query name if available, otherwise fall back to key
-                let display_name = entry.query_info
+                let display_name = entry
+                    .query_info
                     .as_ref()
                     .map(|q| q.name.as_str())
                     .unwrap_or(key);
 
-                ui.label(egui::RichText::new(display_name).heading().strong().size(18.0 * scale));
-                
+                ui.label(
+                    egui::RichText::new(display_name)
+                        .heading()
+                        .strong()
+                        .size(18.0 * scale),
+                );
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(egui::RichText::new(key).weak().small());
                     ui.add_space(8.0);
@@ -710,7 +774,7 @@ impl ApollosKiosk {
                     });
                 });
             });
-            
+
             ui.add_space(12.0);
             ui.separator();
             ui.add_space(12.0);
@@ -725,7 +789,9 @@ impl ApollosKiosk {
                 CondensedData::Tidal(reports) => self.render_tidal_card(ui, reports, scale),
                 CondensedData::Ephem(reports) => self.render_ephem_card(ui, reports, scale),
                 _ => {
-                    ui.label(egui::RichText::new("Data type not yet supported in card view").weak());
+                    ui.label(
+                        egui::RichText::new("Data type not yet supported in card view").weak(),
+                    );
                 }
             }
         });
@@ -738,29 +804,29 @@ impl ApollosKiosk {
             .cloned()
             .unwrap_or_default()
     }
-    
+
     fn apply_theme(&self, ctx: &egui::Context) {
         let theme = self.get_current_theme();
         let mut visuals = egui::Visuals::dark();
-        
+
         visuals.panel_fill = egui::Color32::from_rgb(
             theme.background_color[0],
             theme.background_color[1],
             theme.background_color[2],
         );
-        
+
         visuals.extreme_bg_color = egui::Color32::from_rgb(
             theme.background_color[0].saturating_add(10),
             theme.background_color[1].saturating_add(10),
             theme.background_color[2].saturating_add(10),
         );
-        
+
         visuals.override_text_color = Some(egui::Color32::from_rgb(
             theme.text_color[0],
             theme.text_color[1],
             theme.text_color[2],
         ));
-        
+
         ctx.set_visuals(visuals);
     }
 
@@ -769,14 +835,14 @@ impl ApollosKiosk {
         if let Some(obj) = value.as_object() {
             if obj.contains_key("data") && obj.contains_key("query") {
                 println!("  - Detected wrapped format for key: {}", key);
-                
+
                 // Extract query info
                 let query_info = serde_json::from_value::<QueryInfo>(obj["query"].clone()).ok()?;
-                
+
                 // Parse the data based on key prefix
                 let data_value = &obj["data"];
                 let content = self.parse_content_by_prefix(key, data_value)?;
-                
+
                 println!("  - Successfully parsed wrapped data");
                 return Some(DataEntry {
                     content,
@@ -784,25 +850,29 @@ impl ApollosKiosk {
                 });
             }
         }
-        
+
         // Legacy unwrapped format
         println!("  - Parsing legacy format for key: {}", key);
         let content = self.parse_content_by_prefix(key, value)?;
         println!("  - Successfully parsed legacy content");
-        
+
         Some(DataEntry {
             content,
             query_info: None,
         })
     }
-    
-    fn parse_content_by_prefix(&self, key: &str, value: &serde_json::Value) -> Option<CondensedData> {
+
+    fn parse_content_by_prefix(
+        &self,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Option<CondensedData> {
         // Handle empty data (like gtfs-1 in payload)
         if value.is_null() || (value.is_object() && value.as_object()?.is_empty()) {
             println!("  - Skipping empty data for key: {}", key);
             return None;
         }
-        
+
         // Handle array data (check if empty)
         if let Some(arr) = value.as_array() {
             if arr.is_empty() {
@@ -810,21 +880,35 @@ impl ApollosKiosk {
                 return None;
             }
         }
-        
+
         let content = if key.starts_with("gtfs-") {
-            serde_json::from_value::<Vec<GtfsCondensed>>(value.clone()).ok().map(CondensedData::Gtfs)
+            serde_json::from_value::<Vec<GtfsCondensed>>(value.clone())
+                .ok()
+                .map(CondensedData::Gtfs)
         } else if key.starts_with("gbfs-") {
-            serde_json::from_value::<Vec<GbfsCondensed>>(value.clone()).ok().map(CondensedData::Gbfs)
+            serde_json::from_value::<Vec<GbfsCondensed>>(value.clone())
+                .ok()
+                .map(CondensedData::Gbfs)
         } else if key.starts_with("weather-") {
-            serde_json::from_value::<Vec<WeatherCondensed>>(value.clone()).ok().map(CondensedData::Weather)
+            serde_json::from_value::<Vec<WeatherCondensed>>(value.clone())
+                .ok()
+                .map(CondensedData::Weather)
         } else if key.starts_with("aqi-") {
-            serde_json::from_value::<Vec<AqiCondensed>>(value.clone()).ok().map(CondensedData::Aqi)
+            serde_json::from_value::<Vec<AqiCondensed>>(value.clone())
+                .ok()
+                .map(CondensedData::Aqi)
         } else if key.starts_with("ephem-") {
-            serde_json::from_value::<Vec<EphemerisCondensed>>(value.clone()).ok().map(CondensedData::Ephem)
+            serde_json::from_value::<Vec<EphemerisCondensed>>(value.clone())
+                .ok()
+                .map(CondensedData::Ephem)
         } else if key.starts_with("cal-") {
-            serde_json::from_value::<Vec<CalendarCondensed>>(value.clone()).ok().map(CondensedData::Calendar)
+            serde_json::from_value::<Vec<CalendarCondensed>>(value.clone())
+                .ok()
+                .map(CondensedData::Calendar)
         } else if key.starts_with("tidal-") {
-            serde_json::from_value::<Vec<TidalCondensed>>(value.clone()).ok().map(CondensedData::Tidal)
+            serde_json::from_value::<Vec<TidalCondensed>>(value.clone())
+                .ok()
+                .map(CondensedData::Tidal)
                 .or_else(|| {
                     if let Err(e) = serde_json::from_value::<Vec<TidalCondensed>>(value.clone()) {
                         println!("  - Tidal parse error: {}", e);
@@ -842,12 +926,12 @@ impl ApollosKiosk {
         } else {
             None
         }?;
-        
+
         // Debug success for tidal
         if key.starts_with("tidal-") {
             println!("  - Tidal parse result: Success");
         }
-        
+
         Some(content)
     }
 
@@ -856,7 +940,7 @@ impl ApollosKiosk {
         let mut new_theme = String::new();
         let mut show_selector = self.show_theme_selector;
         let mut show_mqtt_config = false;
-        
+
         egui::Window::new("Theme Selector")
             .open(&mut show_selector)
             .resizable(false)
@@ -877,10 +961,19 @@ impl ApollosKiosk {
                 ui.separator();
 
                 let old_sync = self.config.mqtt_theme_sync;
-                if ui.checkbox(&mut self.config.mqtt_theme_sync, "Sync via MQTT (neiam/sync/theme)").changed() {
+                if ui
+                    .checkbox(
+                        &mut self.config.mqtt_theme_sync,
+                        "Sync via MQTT (neiam/sync/theme)",
+                    )
+                    .changed()
+                {
                     self.save_config();
                     if self.config.mqtt_theme_sync != old_sync {
-                        ui.label(egui::RichText::new("⚠ Restart app to apply MQTT sync changes").color(egui::Color32::from_rgb(255, 180, 100)));
+                        ui.label(
+                            egui::RichText::new("⚠ Restart app to apply MQTT sync changes")
+                                .color(egui::Color32::from_rgb(255, 180, 100)),
+                        );
                     }
                 }
 
@@ -912,17 +1005,30 @@ impl ApollosKiosk {
 
                     ui.horizontal(|ui| {
                         ui.label("Username:");
-                        let mut username = self.config.mqtt_theme_username.clone().unwrap_or_default();
+                        let mut username =
+                            self.config.mqtt_theme_username.clone().unwrap_or_default();
                         if ui.text_edit_singleline(&mut username).changed() {
-                            self.config.mqtt_theme_username = if username.is_empty() { None } else { Some(username) };
+                            self.config.mqtt_theme_username = if username.is_empty() {
+                                None
+                            } else {
+                                Some(username)
+                            };
                         }
                     });
 
                     ui.horizontal(|ui| {
                         ui.label("Password:");
-                        let mut password = self.config.mqtt_theme_password.clone().unwrap_or_default();
-                        if ui.add(egui::TextEdit::singleline(&mut password).password(true)).changed() {
-                            self.config.mqtt_theme_password = if password.is_empty() { None } else { Some(password) };
+                        let mut password =
+                            self.config.mqtt_theme_password.clone().unwrap_or_default();
+                        if ui
+                            .add(egui::TextEdit::singleline(&mut password).password(true))
+                            .changed()
+                        {
+                            self.config.mqtt_theme_password = if password.is_empty() {
+                                None
+                            } else {
+                                Some(password)
+                            };
                         }
                     });
 
@@ -936,7 +1042,10 @@ impl ApollosKiosk {
 
                     if ui.button("💾 Save").clicked() {
                         self.save_config();
-                        ui.label(egui::RichText::new("⚠ Restart app to apply changes").color(egui::Color32::from_rgb(255, 180, 100)));
+                        ui.label(
+                            egui::RichText::new("⚠ Restart app to apply changes")
+                                .color(egui::Color32::from_rgb(255, 180, 100)),
+                        );
                     }
 
                     ui.add_space(5.0);
@@ -983,20 +1092,31 @@ impl ApollosKiosk {
                         ui.add_space(8.0 * scale);
 
                         // Route number/name
-                        ui.label(egui::RichText::new(&r.route).heading().strong().size(96.0 * scale).color(accent_color));
+                        ui.label(
+                            egui::RichText::new(&r.route)
+                                .heading()
+                                .strong()
+                                .size(96.0 * scale)
+                                .color(accent_color),
+                        );
                         ui.add_space(8.0 * scale);
 
                         // Destination info
                         ui.vertical(|ui| {
                             ui.label(egui::RichText::new(&r.dest).size(32.0 * scale));
-                            ui.label(egui::RichText::new(&r.dir).size(28.0 * scale).color(ui.visuals().weak_text_color()));
+                            ui.label(
+                                egui::RichText::new(&r.dir)
+                                    .size(28.0 * scale)
+                                    .color(ui.visuals().weak_text_color()),
+                            );
                         });
                     });
 
                     ui.add_space(8.0 * scale);
 
                     // Determine which times to show (prioritize live times)
-                    let times_to_show: Vec<(String, bool)> = if let Some(live_times) = &r.times_live {
+                    let times_to_show: Vec<(String, bool)> = if let Some(live_times) = &r.times_live
+                    {
                         // Filter out None values and take up to 2
                         live_times
                             .iter()
@@ -1027,13 +1147,14 @@ impl ApollosKiosk {
                                         (ICON_SCHEDULE, ui.visuals().weak_text_color()) // Gray for scheduled
                                     };
 
-                                    ui.label(egui::RichText::new(icon).size(14.0 * scale).color(color));
+                                    ui.label(
+                                        egui::RichText::new(icon).size(14.0 * scale).color(color),
+                                    );
                                     ui.label(
                                         egui::RichText::new(&time)
                                             .monospace()
                                             .size(16.0 * scale)
-                                            .color(ui.visuals().strong_text_color())
-                                            // .background_color(ui.visuals().code_bg_color)
+                                            .color(ui.visuals().strong_text_color()), // .background_color(ui.visuals().code_bg_color)
                                     );
                                 });
                             }
@@ -1060,13 +1181,28 @@ impl ApollosKiosk {
 
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(ICON_PEDAL_BIKE).size(100.0 * scale));
-                        ui.label(egui::RichText::new(format!("{}", s.avail_std)).strong().color(accent_color).size(92.0 * scale));
+                        ui.label(
+                            egui::RichText::new(format!("{}", s.avail_std))
+                                .strong()
+                                .color(accent_color)
+                                .size(92.0 * scale),
+                        );
                         ui.separator();
                         ui.label(egui::RichText::new(ICON_ELECTRIC_BIKE).size(100.0 * scale));
-                        ui.label(egui::RichText::new(format!("{}", s.avail_elec)).strong().color(accent_color).size(92.0 * scale));
+                        ui.label(
+                            egui::RichText::new(format!("{}", s.avail_elec))
+                                .strong()
+                                .color(accent_color)
+                                .size(92.0 * scale),
+                        );
                         ui.separator();
                         ui.label(egui::RichText::new(ICON_LOCAL_PARKING).size(100.0 * scale));
-                        ui.label(egui::RichText::new(format!("{}", s.docks_avail)).strong().color(accent_color).size(92.0 * scale));
+                        ui.label(
+                            egui::RichText::new(format!("{}", s.docks_avail))
+                                .strong()
+                                .color(accent_color)
+                                .size(92.0 * scale),
+                        );
                     });
                 });
             ui.add_space(8.0 * scale);
@@ -1076,13 +1212,24 @@ impl ApollosKiosk {
     fn render_weather_card(&self, ui: &mut egui::Ui, reports: &[WeatherCondensed], scale: f32) {
         for w in reports {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(format!("{:.0}°", w.temp)).size(56.0 * scale).strong());
+                ui.label(
+                    egui::RichText::new(format!("{:.0}°", w.temp))
+                        .size(56.0 * scale)
+                        .strong(),
+                );
                 ui.add_space(12.0 * scale);
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(&w.weather).strong().size(22.0 * scale));
-                    ui.label(egui::RichText::new(format!("Feels like {:.0}°", w.feel)).size(16.0 * scale));
+                    ui.label(
+                        egui::RichText::new(format!("Feels like {:.0}°", w.feel))
+                            .size(16.0 * scale),
+                    );
                     ui.add_space(4.0 * scale);
-                    ui.label(egui::RichText::new(format!("💨 {}mph  💧 {}%", w.wind.speed, w.hum)).size(14.0 * scale).weak());
+                    ui.label(
+                        egui::RichText::new(format!("💨 {}mph  💧 {}%", w.wind.speed, w.hum))
+                            .size(14.0 * scale)
+                            .weak(),
+                    );
                 });
             });
         }
@@ -1095,9 +1242,18 @@ impl ApollosKiosk {
                 .corner_radius(8.0 * scale)
                 .inner_margin(12.0 * scale)
                 .show(ui, |ui| {
-                    ui.label(egui::RichText::new(&e.description).strong().size(16.0 * scale));
+                    ui.label(
+                        egui::RichText::new(&e.description)
+                            .strong()
+                            .size(16.0 * scale),
+                    );
                     ui.add_space(4.0 * scale);
-                    ui.label(egui::RichText::new(&e.date_start).monospace().size(14.0 * scale).weak());
+                    ui.label(
+                        egui::RichText::new(&e.date_start)
+                            .monospace()
+                            .size(14.0 * scale)
+                            .weak(),
+                    );
                 });
             ui.add_space(8.0 * scale);
         }
@@ -1105,9 +1261,16 @@ impl ApollosKiosk {
 
     fn render_aqi_card(&self, ui: &mut egui::Ui, reports: &[AqiCondensed], scale: f32) {
         for a in reports {
-            ui.label(egui::RichText::new(a.name.as_deref().unwrap_or("Unknown")).strong().size(16.0 * scale));
+            ui.label(
+                egui::RichText::new(a.name.as_deref().unwrap_or("Unknown"))
+                    .strong()
+                    .size(16.0 * scale),
+            );
             ui.add_space(4.0 * scale);
-            ui.label(egui::RichText::new(format!("📊 {} measurements", a.measurements.len())).size(14.0 * scale));
+            ui.label(
+                egui::RichText::new(format!("📊 {} measurements", a.measurements.len()))
+                    .size(14.0 * scale),
+            );
             ui.add_space(8.0 * scale);
         }
     }
@@ -1163,7 +1326,9 @@ impl ApollosKiosk {
                                 let mut chars = word.chars();
                                 match chars.next() {
                                     None => String::new(),
-                                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                                    Some(first) => {
+                                        first.to_uppercase().collect::<String>() + chars.as_str()
+                                    }
                                 }
                             })
                             .collect::<Vec<_>>()
@@ -1171,7 +1336,10 @@ impl ApollosKiosk {
 
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new(icon).size(16.0 * scale));
-                            ui.label(egui::RichText::new(format!("{}: ", formatted_key)).size(14.0 * scale));
+                            ui.label(
+                                egui::RichText::new(format!("{}: ", formatted_key))
+                                    .size(14.0 * scale),
+                            );
                             ui.label(egui::RichText::new(value).strong().size(14.0 * scale));
                         });
                         ui.add_space(4.0 * scale);
@@ -1188,12 +1356,19 @@ fn main() -> eframe::Result {
         let env_path = config_dir.join("apollos-kiosk").join(".env");
         if env_path.exists() {
             if let Err(e) = dotenvy::from_path(&env_path) {
-                info!("Warning: Failed to load .env from {}: {}", env_path.display(), e);
+                info!(
+                    "Warning: Failed to load .env from {}: {}",
+                    env_path.display(),
+                    e
+                );
             } else {
                 info!("Loaded environment from {}", env_path.display());
             }
         } else {
-            println!("Did not load env, path must be created: {}", env_path.display())
+            println!(
+                "Did not load env, path must be created: {}",
+                env_path.display()
+            )
         }
     }
 
@@ -1214,4 +1389,3 @@ fn main() -> eframe::Result {
         Box::new(|cc| Ok(Box::new(ApollosKiosk::new(cc, args)))),
     )
 }
-
