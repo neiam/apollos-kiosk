@@ -4,6 +4,7 @@ use apollos_types::{
 };
 use clap::Parser;
 use eframe::egui;
+use egui::UiKind;
 use egui_material_icons::icons::*;
 use log::info;
 use paho_mqtt as mqtt;
@@ -13,7 +14,6 @@ use std::fs;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
-use egui::UiKind;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
@@ -348,12 +348,12 @@ impl ApollosKiosk {
                         if msg.topic() == theme_topic
                             && let Ok(json) =
                                 serde_json::from_str::<serde_json::Value>(&msg.payload_str())
-                                && let Some(theme_name) = json.get("theme").and_then(|t| t.as_str())
-                                {
-                                    println!("Theme MQTT: Parsed theme name: {}", theme_name);
-                                    let _ = theme_tx.send(theme_name.to_string());
-                                    theme_ctx.request_repaint();
-                                }
+                            && let Some(theme_name) = json.get("theme").and_then(|t| t.as_str())
+                        {
+                            println!("Theme MQTT: Parsed theme name: {}", theme_name);
+                            let _ = theme_tx.send(theme_name.to_string());
+                            theme_ctx.request_repaint();
+                        }
                     } else {
                         // None indicates a disconnection, but with auto-reconnect enabled
                         // the client will handle reconnection automatically
@@ -761,11 +761,10 @@ impl ApollosKiosk {
                         ui.separator();
                         ui.label("Move to:");
                         for (idx, name) in ["Left", "Center", "Right"].iter().enumerate() {
-                            if idx != panel_idx
-                                && ui.button(format!("➜ {}", name)).clicked() {
-                                    *to_move = Some((card_idx, idx));
-                                    ui.close();
-                                }
+                            if idx != panel_idx && ui.button(format!("➜ {}", name)).clicked() {
+                                *to_move = Some((card_idx, idx));
+                                ui.close();
+                            }
                         }
                     });
                 });
@@ -829,22 +828,24 @@ impl ApollosKiosk {
     fn parse_data_entry(&self, key: &str, value: &serde_json::Value) -> Option<DataEntry> {
         // Check if this is wrapped format (has both "data" and "query" fields)
         if let Some(obj) = value.as_object()
-            && obj.contains_key("data") && obj.contains_key("query") {
-                println!("  - Detected wrapped format for key: {}", key);
+            && obj.contains_key("data")
+            && obj.contains_key("query")
+        {
+            println!("  - Detected wrapped format for key: {}", key);
 
-                // Extract query info
-                let query_info = serde_json::from_value::<QueryInfo>(obj["query"].clone()).ok()?;
+            // Extract query info
+            let query_info = serde_json::from_value::<QueryInfo>(obj["query"].clone()).ok()?;
 
-                // Parse the data based on key prefix
-                let data_value = &obj["data"];
-                let content = self.parse_content_by_prefix(key, data_value)?;
+            // Parse the data based on key prefix
+            let data_value = &obj["data"];
+            let content = self.parse_content_by_prefix(key, data_value)?;
 
-                println!("  - Successfully parsed wrapped data");
-                return Some(DataEntry {
-                    content,
-                    query_info: Some(query_info),
-                });
-            }
+            println!("  - Successfully parsed wrapped data");
+            return Some(DataEntry {
+                content,
+                query_info: Some(query_info),
+            });
+        }
 
         // Legacy unwrapped format
         println!("  - Parsing legacy format for key: {}", key);
@@ -870,10 +871,11 @@ impl ApollosKiosk {
 
         // Handle array data (check if empty)
         if let Some(arr) = value.as_array()
-            && arr.is_empty() {
-                println!("  - Skipping empty array for key: {}", key);
-                return None;
-            }
+            && arr.is_empty()
+        {
+            println!("  - Skipping empty array for key: {}", key);
+            return None;
+        }
 
         let content = if key.starts_with("gtfs-") {
             serde_json::from_value::<Vec<GtfsCondensed>>(value.clone())
@@ -971,10 +973,10 @@ impl ApollosKiosk {
                     }
                 }
 
-                if self.config.mqtt_theme_sync
-                    && ui.button("⚙ Configure Theme MQTT...").clicked() {
-                        show_mqtt_config = true;
-                    }
+                if self.config.mqtt_theme_sync && ui.button("⚙ Configure Theme MQTT...").clicked()
+                {
+                    show_mqtt_config = true;
+                }
 
                 ui.add_space(5.0);
             });
